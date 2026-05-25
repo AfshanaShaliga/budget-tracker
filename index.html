@@ -439,9 +439,11 @@ const DEFAULT_INCOME = 32500;
 const DEFAULT_GOAL_HOUSE = 100000;
 const DEFAULT_GOAL_EMERGENCY = 50000;
 
-function defaultMonth() {
+function defaultMonth(monthIdx) {
+  // Only June (index 5) pre-fills actuals with budget values; all future months default to 0
+  const isCurrent = (monthIdx === START_MONTH);
   const m = { income: DEFAULT_INCOME, cashInAccount: 0, totalSavingsBalance: 0, notes: '' };
-  m.fixed = DEFAULT_FIXED.map(f => ({...f, actual: f.budget}));
+  m.fixed = DEFAULT_FIXED.map(f => ({...f, budget: isCurrent ? f.budget : 0, actual: isCurrent ? f.budget : 0}));
   m.variable = DEFAULT_VAR.map(n => ({name:n, budget:0, actual:0}));
   m.savings = DEFAULT_SAV.map(n => ({name:n, budget:0, actual:0}));
   return m;
@@ -462,7 +464,7 @@ function defaultYearData(year) {
   const isStartYear = year === START_YEAR;
   return {
     year,
-    months: MONTHS.map((_, i) => defaultMonth()),
+    months: MONTHS.map((_, i) => defaultMonth(i)),
     weeks: defaultWeeksForYear(year),
     goals: { house: DEFAULT_GOAL_HOUSE, emergency: DEFAULT_GOAL_EMERGENCY },
     nw: defaultNW()
@@ -517,12 +519,24 @@ function load() {
       if (d.years) {
         allData = d;
         // Ensure all years have required fields
-        Object.values(allData.years).forEach(yd => {
+        Object.entries(allData.years).forEach(([yearKey, yd]) => {
           if (!yd.goals) yd.goals = { house: DEFAULT_GOAL_HOUSE, emergency: DEFAULT_GOAL_EMERGENCY };
           if (!yd.nw) yd.nw = defaultNW();
-          yd.months.forEach(m => {
+          yd.months.forEach((m, monthIdx) => {
             if (!m.notes) m.notes = '';
             if (!m.income) m.income = DEFAULT_INCOME;
+            // Reset all actuals to 0 for months after June in the start year,
+            // and for all months in future years (not yet started)
+            const isFutureMonth = (parseInt(yearKey) === START_YEAR && monthIdx > START_MONTH)
+                                || (parseInt(yearKey) > START_YEAR);
+            if (isFutureMonth) {
+              m.fixed.forEach(r => { r.actual = 0; r.budget = 0; });
+              m.variable.forEach(r => { r.actual = 0; r.budget = 0; });
+              m.savings.forEach(r => { r.actual = 0; r.budget = 0; });
+              m.cashInAccount = 0;
+              m.totalSavingsBalance = 0;
+              m.notes = '';
+            }
           });
         });
       }
@@ -681,19 +695,23 @@ function renderMonthly() {
   // Fixed
   html += `<tr class="section-header"><td colspan="5">🔒 Fixed Expenses</td></tr>`;
   html += `<tr><th>Description</th><th>Budget</th><th>Actual</th><th>Diff</th><th></th></tr>`;
+  const isFutureMonthView = (currentYear === START_YEAR && currentMonth > START_MONTH) || (currentYear > START_YEAR);
   m.fixed.forEach((r, i) => {
     const diff = (r.actual || 0) - (r.budget || 0);
     const dc = diff < 0 ? 'diff-pos' : diff > 0 ? 'diff-neg' : 'diff-zero';
+    const nameCell = (editMode || isFutureMonthView)
+      ? `<input class="name-input" type="text" value="${r.name}" onchange="updateFixedName(${i},this.value)" />`
+      : r.name;
     html += `<tr>
-      <td class="name-cell">${editMode ? `<input class="name-input" type="text" value="${r.name}" onchange="updateFixedName(${i},this.value)" />` : r.name}</td>
+      <td class="name-cell">${nameCell}</td>
       <td><input class="amount-input" type="number" value="${r.budget||0}" onchange="updateFixedBudget(${i},this.value)" /></td>
       <td><input class="amount-input" type="number" value="${r.actual||0}" onchange="updateFixedActual(${i},this.value)" /></td>
       <td class="${dc}">${diff>=0?'+':''}${fmtNum(diff)}</td>
-      <td>${editMode ? `<button class="del-btn" onclick="delFixed(${i})">✕</button>` : ''}</td>
+      <td>${(editMode || isFutureMonthView) ? `<button class="del-btn" onclick="delFixed(${i})">✕</button>` : ''}</td>
     </tr>`;
   });
   html += `<tr class="total-row"><td>Total Fixed</td><td>${fmtNum(m.fixed.reduce((s,f)=>s+(f.budget||0),0))}</td><td>${fmtNum(c.totalFixed)}</td><td></td><td></td></tr>`;
-  if (editMode) html += `<tr><td colspan="5"><button class="add-row" onclick="addFixed()">＋ Add Fixed Expense</button></td></tr>`;
+  if (editMode || isFutureMonthView) html += `<tr><td colspan="5"><button class="add-row" onclick="addFixed()">＋ Add Fixed Expense</button></td></tr>`;
 
   // Variable
   html += `<tr class="section-header"><td colspan="5">🔄 Variable Expenses</td></tr>`;
